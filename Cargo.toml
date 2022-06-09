@@ -23,6 +23,11 @@ impl-trait-for-tuples = "0.2"
 deepsize = "0.2.0"
 deepsize_derive = "0.1.2"
 textwrap = "0.15.0"
+memmap2 = "0.5.4"
+static_assertions = "1.1.0"
+log = "0.4.17"
+env_logger = "0.9.0"
+memoffset = { version = "0.6.5", features = ["unstable_const"] }
 
 # TODO: eliminate dependency on timely-dataflow by cloning relevant
 # parts.

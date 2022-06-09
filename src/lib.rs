@@ -1,3 +1,5 @@
+#![feature(const_ptr_offset_from, alloc_layout_extra)]
+
 pub mod time;
 pub use time::Timestamp;
 

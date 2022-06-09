@@ -14,6 +14,7 @@ pub mod consolidation;
 pub mod cursor;
 pub mod layers;
 pub mod ord;
+pub mod persistence;
 pub mod spine_fueled;
 
 use crate::{algebra::MonoidValue, lattice::Lattice, time::Timestamp};
