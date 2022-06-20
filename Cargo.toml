@@ -23,10 +23,20 @@ impl-trait-for-tuples = "0.2"
 deepsize = "0.2.0"
 deepsize_derive = "0.1.2"
 textwrap = "0.15.0"
+mtbl = "0.2.1"
+mtbl-sys = "0.2.0"
+libc = "0.2.19"
+uuid = { version = "1.1.2", features = ["v4"] }
+bincode = "2.0.0-rc.1"
+bincode_derive = "2.0.0-rc.1"
 
 # TODO: eliminate dependency on timely-dataflow by cloning relevant
 # parts.
 timely = "0.12.0"
+
+[dev-dependencies]
+log = "*"
+env_logger = "*"
 
 [[bench]]
 name = "galen"

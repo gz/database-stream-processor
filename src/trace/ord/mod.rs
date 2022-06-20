@@ -49,3 +49,5 @@ pub mod indexed_zset_batch;
 pub use indexed_zset_batch::OrdIndexedZSet;
 
 pub type OrdIndexedZSetSpine<K, V, R, O = usize> = Spine<Rc<OrdIndexedZSet<K, V, R, O>>>;
+
+pub mod persistent;
