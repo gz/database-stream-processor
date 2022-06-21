@@ -394,12 +394,14 @@ where
     R: MonoidValue + Encode + Decode,
 {
     fn advance_one(&self) {
-        let (k, v) = self.cursor.next().unwrap();
+        unimplemented!()
+
+        /*let (k, v) = self.cursor.next().unwrap();
 
         let (key, len) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
         let (obj, len) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
 
-        Box::leak(obj)
+        Box::leak(obj)*/
     }
 }
 
@@ -417,14 +419,16 @@ where
     K: Ord + Clone + Encode + Decode,
     R: MonoidValue + Encode + Decode,
 {
-    type Storage = OrdZSetStorage<K, R>;
+    type Storage = OrdZSet<K, R>;
 
     fn key<'a>(&self, storage: &'a Self::Storage) -> &'a K {
-        let (obj, len) = decode_from_slice(&self.cursor.next().unwrap().0, BINCODE_CONFIG)
-            .expect("Can't deserialize");
+        unimplemented!()
+
+        //        let (obj, len) = decode_from_slice(&self.cursor.next().unwrap().0, BINCODE_CONFIG)
+        //            .expect("Can't deserialize");
         // FIXME: this is a hack to get around the fact that deserialize the
         // object and storage doesn't actually hold the content
-        Box::leak(obj)
+        //        Box::leak(obj)
     }
 
     fn val<'a>(&self, _storage: &'a Self::Storage) -> &'a () {
@@ -440,15 +444,19 @@ where
     }
 
     fn key_valid(&self, storage: &Self::Storage) -> bool {
-        self.cursor.peek().is_some()
+        unimplemented!()
+        //self.cursor.peek().is_some()
     }
 
     fn val_valid(&self, _storage: &Self::Storage) -> bool {
-        self.cursor.peek().is_some()
+        unimplemented!()
+        //self.cursor.peek().is_some()
     }
 
     fn step_key(&mut self, storage: &Self::Storage) {
-        self.cursor.next();
+        unimplemented!()
+
+        //self.cursor.next();
     }
 
     fn seek_key(&mut self, storage: &Self::Storage, key: &K) {
