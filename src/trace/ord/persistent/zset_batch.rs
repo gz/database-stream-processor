@@ -24,12 +24,20 @@ use crate::{
     NumEntries, SharedRef,
 };
 
-use bincode::{decode_from_slice, error::EncodeError, Decode, Encode};
+use bincode::{
+    config::{BigEndian, Fixint},
+    decode_from_slice,
+    error::EncodeError,
+    Decode, Encode,
+};
 use deepsize::DeepSizeOf;
 use rocksdb::{DBRawIterator, IteratorMode, Options, WriteBatch, DB};
 use uuid::Uuid;
 
-static BINCODE_CONFIG: bincode::config::Configuration = bincode::config::standard();
+static BINCODE_CONFIG: bincode::config::Configuration<BigEndian, Fixint> =
+    bincode::config::standard()
+        .with_fixed_int_encoding()
+        .with_big_endian();
 
 /// An immutable collection of `(key, weight)` pairs without timing information.
 // TODO(persistence) probably want to preserve/implement these traits:
@@ -255,11 +263,24 @@ where
         let mut db_iter = self.db.raw_iterator();
         db_iter.seek_to_first();
 
+        let cur_key = if db_iter.valid() {
+            // TODO: code-repetition
+            if let Some(k) = db_iter.key() {
+                let (key, _) = decode_from_slice::<'_, K, _>(&k, BINCODE_CONFIG)
+                    .expect("Can't decode_from_slice");
+                Some(key)
+            } else {
+                unreachable!("Why does db_iter.valid() not imply that key is Some(k)?")
+            }
+        } else {
+            None
+        };
+
         OrdZSetCursor {
             empty: (),
             valid: true,
             db_iter,
-            cur_key: None,
+            cur_key: cur_key,
             cur_val_idx: 0,
             values: Vec::new(),
             tmp_key: ReusableEncodeBuffer(Vec::new()),
@@ -393,8 +414,7 @@ where
     }
 
     fn key_valid(&self) -> bool {
-        unimplemented!()
-        //self.cursor.peek().is_some()
+        self.cur_key.is_some()
     }
 
     fn val_valid(&self) -> bool {
@@ -403,36 +423,53 @@ where
     }
 
     fn step_key(&mut self) {
-        self.db_iter.next();
         if self.db_iter.valid() {
-            // TODO: code-repetition
-            // TODO: Check does db_iter.valid() imply key will be Some(k)?
-            if let Some(k) = self.db_iter.key() {
-                let (key, _) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
-                self.cur_key = Some(key);
+            // We can only call next if we're in a valid state
+            self.db_iter.next();
+
+            if !self.db_iter.valid() {
+                // we reached the end, so stay there
+                // (This is the same behavior as ordered leaf cursor)
+                self.db_iter.prev();
+                return;
             } else {
-                self.cur_key = None;
+                assert!(self.db_iter.valid());
+                // TODO: some code-repetition with other methods here:
+                if let Some(k) = self.db_iter.key() {
+                    let (key, _) =
+                        decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
+                    self.cur_key = Some(key);
+                } else {
+                    unreachable!("db_iter.valid() implies Some(k)")
+                }
             }
-        } else {
-            self.cur_key = None;
         }
     }
 
     fn seek_key(&mut self, key: &K) {
+        if let Some(ref cur_key) = self.cur_key {
+            if cur_key >= key {
+                // The rocksdb seek call will start from the beginning, but we
+                // don't have the same semantics in OrderedLeafCursor. So in case
+                // we're seeking something that's behind us we can just skip the
+                // seek call.
+                return;
+            }
+        }
         self.tmp_key.0.clear();
         bincode::encode_into_writer(key, &mut self.tmp_key, BINCODE_CONFIG)
-            .expect("Can't serialize key during `seek_key`");
+            .expect("Can't encode_into_writer key during `seek_key`");
         self.db_iter.seek(self.tmp_key.0.as_slice());
 
         if self.db_iter.valid() {
             // TODO: code-repetition
-            // TODO: Check does db_iter.valid() imply key will be Some(k)?
             // TODO: maybe we can use `key` now, need to figure out semantics of `seek_key`
             if let Some(k) = self.db_iter.key() {
-                let (key, _) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
+                let (key, _) =
+                    decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
                 self.cur_key = Some(key);
             } else {
-                self.cur_key = None;
+                unreachable!("db_iter.valid() implies Some(k)")
             }
         } else {
             self.cur_key = None;
@@ -451,10 +488,11 @@ where
             // TODO: code-repetition
             // TODO: Check does db_iter.valid() imply key will be Some(k)?
             if let Some(k) = self.db_iter.key() {
-                let (key, _) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
+                let (key, _) =
+                    decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
                 self.cur_key = Some(key);
             } else {
-                self.cur_key = None;
+                unreachable!("db_iter.valid() implies Some(k)")
             }
         } else {
             self.cur_key = None;
