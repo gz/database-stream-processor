@@ -55,8 +55,9 @@ proptest! {
     // behaves the same as the non-persistent [`OrdZSet`] cursor.
     #[test]
     fn ord_zet_cursor_equivalence(mut ks in keys::<usize>(0..512), ops in actions::<usize, ()>()) {
-        // Builder interface wants sorted keys
+        // Builder interface wants sorted, unique(?) keys:
         ks.sort_unstable();
+        ks.dedup();
 
         // Instantiate a regular OrdZSet
         let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
@@ -119,20 +120,4 @@ proptest! {
             }
         }
     }
-}
-
-#[test]
-fn zset_understanding_seek_key() {
-    let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
-    model_builder.push((1usize, (), 1usize));
-    model_builder.push((3usize, (), 3usize));
-    let model = model_builder.done();
-    let mut model_cursor = model.cursor();
-    model_cursor.seek_key(&2usize);
-    model_cursor.seek_key(&0usize);
-    model_cursor.seek_key(&0usize);
-
-    // The OrdZSet seek calls start from the current position of the cursor and
-    // only move forward
-    assert_eq!(model_cursor.key(), &3usize);
 }

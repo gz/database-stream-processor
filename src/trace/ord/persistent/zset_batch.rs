@@ -429,7 +429,7 @@ where
 
             if !self.db_iter.valid() {
                 // we reached the end, so stay there
-                // (This is the same behavior as ordered leaf cursor)
+                // (This is the same behavior [`OrderedLeafCursor`])
                 self.db_iter.prev();
                 return;
             } else {
@@ -440,7 +440,7 @@ where
                         decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
                     self.cur_key = Some(key);
                 } else {
-                    unreachable!("db_iter.valid() implies Some(k)")
+                    unreachable!("db_iter.valid() implies Some(key)")
                 }
             }
         }
@@ -449,10 +449,11 @@ where
     fn seek_key(&mut self, key: &K) {
         if let Some(ref cur_key) = self.cur_key {
             if cur_key >= key {
-                // The rocksdb seek call will start from the beginning, but we
-                // don't have the same semantics in OrderedLeafCursor. So in case
-                // we're seeking something that's behind us we can just skip the
-                // seek call.
+                // The rocksdb seek call will start from the beginning, whereas
+                // [`OrderedLeafCursor`] will start to seek from the current
+                // position. We can fix the discrepency here since we know the
+                // batch is ordered: If we're seeking something that's behind
+                // us, we can just skip the seek call.
                 return;
             }
         }
@@ -463,13 +464,12 @@ where
 
         if self.db_iter.valid() {
             // TODO: code-repetition
-            // TODO: maybe we can use `key` now, need to figure out semantics of `seek_key`
             if let Some(k) = self.db_iter.key() {
                 let (key, _) =
                     decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
                 self.cur_key = Some(key);
             } else {
-                unreachable!("db_iter.valid() implies Some(k)")
+                unreachable!("db_iter.valid() implies Some(key)")
             }
         } else {
             self.cur_key = None;
@@ -486,13 +486,12 @@ where
         self.db_iter.seek_to_first();
         if self.db_iter.valid() {
             // TODO: code-repetition
-            // TODO: Check does db_iter.valid() imply key will be Some(k)?
             if let Some(k) = self.db_iter.key() {
                 let (key, _) =
                     decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
                 self.cur_key = Some(key);
             } else {
-                unreachable!("db_iter.valid() implies Some(k)")
+                unreachable!("db_iter.valid() implies Some(key)")
             }
         } else {
             self.cur_key = None;
