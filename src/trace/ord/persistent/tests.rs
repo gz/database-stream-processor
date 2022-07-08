@@ -27,11 +27,8 @@ enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
 
 fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value = CursorAction<K, V>>
 {
-    // Generate a possible action for applying on the vspace,
-    // note we currently assume that a frame is either of base-page
-    // or large-page size. Arbitrary frames are possible to map
-    // but our (simple) vspace can only unmap one page-table
-    // entry at a time.
+    // Generate some possible function invocations we can call on to the
+    // respective cursors.
     prop_oneof![
         Just(CursorAction::StepKey),
         //Just(CursorAction::StepVal),
