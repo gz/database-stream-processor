@@ -4,8 +4,11 @@
 use std::ops::Range;
 use std::vec::Vec;
 
+use bincode::Decode;
+use bincode::Encode;
 use proptest::prelude::*;
 
+use crate::algebra::MonoidValue;
 use crate::trace::cursor::Cursor;
 use crate::trace::ord as dram_ord;
 use crate::trace::ord::persistent as persistent_ord;
@@ -23,6 +26,7 @@ enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
     RewindVals,
     Key,
     Val,
+    Weight,
 }
 
 fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value = CursorAction<K, V>>
@@ -31,12 +35,13 @@ fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value =
     // respective cursors.
     prop_oneof![
         Just(CursorAction::StepKey),
-        //Just(CursorAction::StepVal),
+        Just(CursorAction::StepVal),
         Just(CursorAction::RewindKeys),
-        //Just(CursorAction::RewindVals),
+        Just(CursorAction::RewindVals),
         Just(CursorAction::Key),
-        //Just(CursorAction::Val),
-        //any::<V>().prop_map(CursorAction::SeekVal),
+        Just(CursorAction::Val),
+        Just(CursorAction::Weight),
+        any::<V>().prop_map(CursorAction::SeekVal),
         any::<K>().prop_map(CursorAction::SeekKey),
     ]
 }
@@ -76,48 +81,81 @@ proptest! {
         let totest = totest_builder.done();
         let mut totest_cursor = totest.cursor();
 
+        fn check_eq_invariants<K,R>(step: usize, model_cursor: &dram_ord::zset_batch::OrdZSetCursor<K, R>, totest_cursor: &persistent_ord::zset_batch::OrdZSetCursor<K, R>)
+        where
+            K: Ord + Clone + Encode + Decode,
+            R: MonoidValue + Encode + Decode
+        {
+            assert_eq!(model_cursor.key_valid(), totest_cursor.key_valid(), "key_valid() mismatch in step {}", step);
+            assert_eq!(model_cursor.val_valid(), totest_cursor.val_valid(), "val_valid() mismatch in step {}", step);
+        }
+
         assert_eq!(totest.len(), model.len());
         //eprintln!("{:?}", ops);
-        for action in ops {
+        for (i, action) in ops.iter().enumerate() {
             //eprintln!("{:?}", action);
             match action {
                 CursorAction::StepKey => {
                     model_cursor.step_key();
-                    totest_cursor.step_key()
+                    totest_cursor.step_key();
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::StepVal => {
                     model_cursor.step_val();
                     totest_cursor.step_val();
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::SeekKey(k) => {
                     model_cursor.seek_key(&k);
                     totest_cursor.seek_key(&k);
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::SeekVal(v) => {
                     model_cursor.seek_val(&v);
                     totest_cursor.seek_val(&v);
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::RewindKeys => {
                     model_cursor.rewind_keys();
                     totest_cursor.rewind_keys();
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::RewindVals => {
                     model_cursor.rewind_vals();
                     totest_cursor.rewind_vals();
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::Key => {
                     if model_cursor.key_valid() {
-                        assert!(totest_cursor.key_valid(), "key not valid (model key is {:?})?", model_cursor.key());
                         assert_eq!(model_cursor.key(), totest_cursor.key());
                     }
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
                 CursorAction::Val => {
                     if model_cursor.val_valid() {
-                        assert!(totest_cursor.val_valid());
                         assert_eq!(model_cursor.val(), totest_cursor.val());
                     }
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
                 },
+                CursorAction::Weight => {
+                    if model_cursor.key_valid() {
+                        assert_eq!(model_cursor.weight(), totest_cursor.weight());
+                    }
+                    check_eq_invariants(i, &model_cursor, &totest_cursor);
+                }
             }
         }
     }
+}
+
+#[test]
+fn zset_duplicates() {
+    // Instantiate a regular OrdZSet
+    let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
+    model_builder.push((1, (), 1));
+    model_builder.push((1, (), 1));
+    model_builder.push((1, (), 2));
+
+    let model = model_builder.done();
+    eprintln!("{:?}", model);
 }

@@ -24,20 +24,12 @@ use crate::{
     NumEntries, SharedRef,
 };
 
-use bincode::{
-    config::{BigEndian, Fixint},
-    decode_from_slice,
-    error::EncodeError,
-    Decode, Encode,
-};
+use bincode::{decode_from_slice, Decode, Encode};
 use deepsize::DeepSizeOf;
 use rocksdb::{DBRawIterator, IteratorMode, Options, WriteBatch, DB};
 use uuid::Uuid;
 
-static BINCODE_CONFIG: bincode::config::Configuration<BigEndian, Fixint> =
-    bincode::config::standard()
-        .with_fixed_int_encoding()
-        .with_big_endian();
+use super::{ReusableEncodeBuffer, BINCODE_CONFIG};
 
 /// An immutable collection of `(key, weight)` pairs without timing information.
 // TODO(persistence) probably want to preserve/implement these traits:
@@ -263,12 +255,14 @@ where
         let mut db_iter = self.db.raw_iterator();
         db_iter.seek_to_first();
 
-        let cur_key = if db_iter.valid() {
+        let cur_key_weight = if db_iter.valid() {
             // TODO: code-repetition
-            if let Some(k) = db_iter.key() {
+            if let (Some(k), Some(v)) = (db_iter.key(), db_iter.value()) {
                 let (key, _) = decode_from_slice::<'_, K, _>(&k, BINCODE_CONFIG)
                     .expect("Can't decode_from_slice");
-                Some(key)
+                let (weight, _) =
+                    decode_from_slice(&v, BINCODE_CONFIG).expect("Can't decode current value");
+                Some((key, weight))
             } else {
                 unreachable!("Why does db_iter.valid() not imply that key is Some(k)?")
             }
@@ -280,9 +274,8 @@ where
             empty: (),
             valid: true,
             db_iter,
-            cur_key: cur_key,
-            cur_val_idx: 0,
-            values: Vec::new(),
+            cur_key_weight,
+            cursor_upper_bound: None,
             tmp_key: ReusableEncodeBuffer(Vec::new()),
         }
     }
@@ -363,14 +356,37 @@ where
 }
 
 /// A cursor for navigating a single layer.
-pub struct OrdZSetCursor<'s, K, V> {
-    valid: bool,
+pub struct OrdZSetCursor<'s, K, R> {
     empty: (),
+    valid: bool,
     db_iter: DBRawIterator<'s>,
-    cur_key: Option<K>,
-    cur_val_idx: usize,
+    cur_key_weight: Option<(K, R)>,
+    cursor_upper_bound: Option<K>,
     tmp_key: ReusableEncodeBuffer,
-    values: Vec<V>,
+}
+
+impl<'s, K, R> OrdZSetCursor<'s, K, R>
+where
+    K: Ord + Clone + Encode + Decode,
+    R: MonoidValue + Encode + Decode,
+{
+    /// Loads the current key and weight from RocksDB into the
+    /// [`OrdZSetCursor`].
+    ///
+    /// # Panics
+    /// - In case the `db_iter` is invalid.
+    fn update_current_key_weight(&mut self) {
+        assert!(self.db_iter.valid());
+        if let (Some(k), Some(v)) = (self.db_iter.key(), self.db_iter.value()) {
+            let (key, _) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode current key");
+            let (weight, _) =
+                decode_from_slice(&v, BINCODE_CONFIG).expect("Can't decode current value");
+            self.cur_key_weight = Some((key, weight));
+        } else {
+            // This holds according to the RocksDB C++ API docs
+            unreachable!("db_iter.valid() implies Some(key)")
+        }
+    }
 }
 
 impl<K, V> Debug for OrdZSetCursor<'_, K, V>
@@ -391,7 +407,7 @@ where
     type Storage = OrdZSet<K, R>;
 
     fn key(&self) -> &K {
-        &self.cur_key.as_ref().unwrap()
+        &self.cur_key_weight.as_ref().unwrap().0
     }
 
     fn val(&self) -> &() {
@@ -402,52 +418,52 @@ where
     where
         's: 'a,
     {
-        unimplemented!()
+        // It's technically ok to call this on a batch with value type `()`, but
+        // shouldn't happen in practice.
+        unimplemented!();
     }
 
     fn map_times<L: FnMut(&(), &R)>(&mut self, mut logic: L) {
-        unimplemented!()
+        if self.key_valid() {
+            logic(&(), &self.cur_key_weight.as_ref().unwrap().1);
+        }
     }
 
     fn weight(&mut self) -> R {
-        unimplemented!()
+        self.cur_key_weight.as_ref().unwrap().1.clone()
     }
 
     fn key_valid(&self) -> bool {
-        self.cur_key.is_some()
+        self.cur_key_weight.is_some()
     }
 
     fn val_valid(&self) -> bool {
-        unimplemented!()
-        //self.cursor.peek().is_some()
+        self.valid
     }
 
     fn step_key(&mut self) {
+        self.valid = true;
         if self.db_iter.valid() {
             // We can only call next if we're in a valid state
             self.db_iter.next();
 
-            if !self.db_iter.valid() {
-                // we reached the end, so stay there
-                // (This is the same behavior [`OrderedLeafCursor`])
-                self.db_iter.prev();
-                return;
+            if self.db_iter.valid() {
+                self.update_current_key_weight();
             } else {
-                assert!(self.db_iter.valid());
-                // TODO: some code-repetition with other methods here:
-                if let Some(k) = self.db_iter.key() {
-                    let (key, _) =
-                        decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
-                    self.cur_key = Some(key);
-                } else {
-                    unreachable!("db_iter.valid() implies Some(key)")
-                }
+                // We need to "record" that we reached the end by storing the
+                // last key in the `cursor_upper_bound`.
+                //
+                // Otherwise something like  keys = [1], operations = [StepKey,
+                // SeekKey(0)] would result in key_valid() returning true (see
+                // `seek_key`)
+                self.cursor_upper_bound = self.cur_key_weight.take().map(|(k, _)| k);
             }
         }
     }
 
     fn seek_key(&mut self, key: &K) {
-        if let Some(ref cur_key) = self.cur_key {
+        self.valid = true;
+        if let Some((cur_key, _weight)) = self.cur_key_weight.as_ref() {
             if cur_key >= key {
                 // The rocksdb seek call will start from the beginning, whereas
                 // [`OrderedLeafCursor`] will start to seek from the current
@@ -457,49 +473,46 @@ where
                 return;
             }
         }
-        self.tmp_key.0.clear();
-        bincode::encode_into_writer(key, &mut self.tmp_key, BINCODE_CONFIG)
-            .expect("Can't encode_into_writer key during `seek_key`");
-        self.db_iter.seek(self.tmp_key.0.as_slice());
+        if let Some(cursor_upper_bound) = self.cursor_upper_bound.as_ref() {
+            if cursor_upper_bound >= key {
+                // We also need to keep track of the last seeked key in case we didn't
+                // find one, e.g., consider keys = [4], operations = [SeekKey(5),
+                // SeekKey(0)] should ensure to key_valid() == false after the second
+                // seek completes:
+                return;
+            }
+        }
+
+        let encoded_key = self.tmp_key.encode(key).expect("Can't encode `key`");
+        self.db_iter.seek(encoded_key);
+        self.cursor_upper_bound = Some(key.clone());
 
         if self.db_iter.valid() {
-            // TODO: code-repetition
-            if let Some(k) = self.db_iter.key() {
-                let (key, _) =
-                    decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
-                self.cur_key = Some(key);
-            } else {
-                unreachable!("db_iter.valid() implies Some(key)")
-            }
+            self.update_current_key_weight();
         } else {
-            self.cur_key = None;
+            self.cur_key_weight = None;
         }
     }
 
     fn step_val(&mut self) {
-        unimplemented!()
+        self.valid = false;
     }
 
     fn seek_val(&mut self, _val: &()) {}
 
     fn rewind_keys(&mut self) {
+        self.cursor_upper_bound = None;
         self.db_iter.seek_to_first();
         if self.db_iter.valid() {
-            // TODO: code-repetition
-            if let Some(k) = self.db_iter.key() {
-                let (key, _) =
-                    decode_from_slice(&k, BINCODE_CONFIG).expect("Can't decode_from_slice");
-                self.cur_key = Some(key);
-            } else {
-                unreachable!("db_iter.valid() implies Some(key)")
-            }
+            self.update_current_key_weight();
         } else {
-            self.cur_key = None;
+            self.cur_key_weight = None;
         }
+        self.valid = true;
     }
 
     fn rewind_vals(&mut self) {
-        unimplemented!()
+        self.valid = true;
     }
 }
 
@@ -512,20 +525,10 @@ where
     db: DB,
     path: String,
     /// The DB only "knows" approximate key count so we store the accurate count here.
-    keys: usize,
     batch: WriteBatch,
     tmp_key: ReusableEncodeBuffer,
     tmp_val: ReusableEncodeBuffer,
     _t: PhantomData<(K, R)>,
-}
-
-struct ReusableEncodeBuffer(Vec<u8>);
-
-impl bincode::enc::write::Writer for &mut ReusableEncodeBuffer {
-    fn write(&mut self, bytes: &[u8]) -> Result<(), EncodeError> {
-        self.0.extend(bytes);
-        Ok(())
-    }
 }
 
 impl<K, R> Builder<K, (), (), R, OrdZSet<K, R>> for OrdZSetBuilder<K, R>
@@ -542,36 +545,31 @@ where
             db,
             path: tbl_path,
             batch: WriteBatch::default(),
-            keys: 0,
             tmp_key: ReusableEncodeBuffer(Vec::new()),
             tmp_val: ReusableEncodeBuffer(Vec::new()),
             _t: PhantomData,
         }
     }
 
-    fn with_capacity(_time: (), cap: usize) -> Self {
-        // TODO(persistence): maybe pre-allocate file size for `with_capacity`
-        // calls, does it matter?
+    fn with_capacity(_time: (), _cap: usize) -> Self {
+        // We would need a `with_capacity` method on [`rocksdb::WriteBatch`] for
+        // this to be useful
         Self::new(_time)
     }
 
     #[inline]
     fn push(&mut self, (key, (), diff): (K, (), R)) {
-        self.tmp_key.0.clear();
-        self.tmp_val.0.clear();
-        bincode::encode_into_writer(key, &mut self.tmp_key, BINCODE_CONFIG)
-            .expect("Can't serialize data");
-        bincode::encode_into_writer(diff, &mut self.tmp_val, BINCODE_CONFIG)
-            .expect("Can't serialize data");
-
-        self.batch.put(&self.tmp_key.0, &self.tmp_val.0);
+        let encoded_key = self.tmp_key.encode(&key).expect("Can't encode `key`");
+        let encoded_val = self.tmp_val.encode(&diff).expect("Can't encode `diff`");
+        self.batch.put(encoded_key, encoded_val);
     }
 
     #[inline(never)]
     fn done(self) -> OrdZSet<K, R> {
         let keys = self.batch.len();
-        // We drop this to force writing of the mtbl file.
-        self.db.write(self.batch).expect("can't write things?");
+        self.db
+            .write(self.batch)
+            .expect("Could not write batch to db");
 
         OrdZSet {
             db: self.db,
