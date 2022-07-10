@@ -2,6 +2,7 @@
 //! non-persistent versions.
 
 use std::ops::Range;
+use std::sync::atomic::AtomicUsize;
 use std::vec::Vec;
 
 use bincode::Decode;
@@ -29,6 +30,7 @@ enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
     /// Weight is a mutable operation on on the cursor so we model it as such,
     /// even though in most cases, it doesn't seem to mutate.
     Weight,
+    MapTimes,
 }
 
 fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value = CursorAction<K, V>>
@@ -43,6 +45,7 @@ fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value =
         Just(CursorAction::Key),
         Just(CursorAction::Val),
         Just(CursorAction::Weight),
+        Just(CursorAction::MapTimes),
         any::<V>().prop_map(CursorAction::SeekVal),
         any::<K>().prop_map(CursorAction::SeekKey),
     ]
@@ -146,6 +149,20 @@ proptest! {
                     }
                     check_eq_invariants(i, &model_cursor, &totest_cursor);
                 }
+                CursorAction::MapTimes => {
+                    let mut model_invocations = Vec::new();
+                    let mut test_invocation = Vec::new();
+                    model_cursor.map_times(|v, t| {
+                        model_invocations.push((v.clone(), t.clone()));
+                    });
+                    totest_cursor.map_times(|v, t| {
+                        test_invocation.push((v.clone(), t.clone()));
+                    });
+                    assert_eq!(model_invocations, test_invocation);
+                }
+
+
+
             }
         }
     }

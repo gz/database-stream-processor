@@ -331,31 +331,6 @@ where
 }
 
 /// A cursor for navigating a single layer.
-#[derive(Debug)]
-pub struct OrdZSetStorage<K, V> {
-    valid: bool,
-    current_key: Option<K>,
-    current_val: Option<V>,
-}
-
-impl<K, R> OrdZSetStorage<K, R>
-where
-    K: Ord + Clone + Encode + Decode,
-    R: MonoidValue + Encode + Decode,
-{
-    fn advance_one(&self) {
-        unimplemented!()
-
-        /*let (k, v) = self.cursor.next().unwrap();
-
-        let (key, len) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
-        let (obj, len) = decode_from_slice(&k, BINCODE_CONFIG).expect("Can't deserialize");
-
-        Box::leak(obj)*/
-    }
-}
-
-/// A cursor for navigating a single layer.
 pub struct OrdZSetCursor<'s, K, R> {
     empty: (),
     valid: bool,
