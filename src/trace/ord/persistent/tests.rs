@@ -15,7 +15,7 @@ use crate::trace::ord::persistent as persistent_ord;
 use crate::trace::BatchReader;
 use crate::trace::Builder;
 
-/// Commands we issue on [`Cursor`].
+/// Mutable commands on [`Cursor`].
 #[derive(Debug, Clone)]
 enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
     StepKey,
@@ -26,6 +26,8 @@ enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
     RewindVals,
     Key,
     Val,
+    /// Weight is a mutable operation on on the cursor so we model it as such,
+    /// even though in most cases, it doesn't seem to mutate.
     Weight,
 }
 
@@ -81,6 +83,7 @@ proptest! {
         let totest = totest_builder.done();
         let mut totest_cursor = totest.cursor();
 
+        // We check the non-mutating cursor interface after every command/mutation.
         fn check_eq_invariants<K,R>(step: usize, model_cursor: &dram_ord::zset_batch::OrdZSetCursor<K, R>, totest_cursor: &persistent_ord::zset_batch::OrdZSetCursor<K, R>)
         where
             K: Ord + Clone + Encode + Decode,
