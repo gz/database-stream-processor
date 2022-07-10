@@ -2,7 +2,6 @@
 //! non-persistent versions.
 
 use std::ops::Range;
-use std::sync::atomic::AtomicUsize;
 use std::vec::Vec;
 
 use bincode::Decode;
@@ -35,8 +34,7 @@ enum CursorAction<K: Arbitrary + Clone, V: Arbitrary + Clone> {
 
 fn action<K: Arbitrary + Clone, V: Arbitrary + Clone>() -> impl Strategy<Value = CursorAction<K, V>>
 {
-    // Generate some possible function invocations we can call on to the
-    // respective cursors.
+    // Generate possible invocations we can call on the respective cursors.
     prop_oneof![
         Just(CursorAction::StepKey),
         Just(CursorAction::StepVal),
@@ -86,7 +84,8 @@ proptest! {
         let totest = totest_builder.done();
         let mut totest_cursor = totest.cursor();
 
-        // We check the non-mutating cursor interface after every command/mutation.
+        // We check the non-mutating cursor interface after every
+        // command/mutation.
         fn check_eq_invariants<K,R>(step: usize, model_cursor: &dram_ord::zset_batch::OrdZSetCursor<K, R>, totest_cursor: &persistent_ord::zset_batch::OrdZSetCursor<K, R>)
         where
             K: Ord + Clone + Encode + Decode,
@@ -97,9 +96,7 @@ proptest! {
         }
 
         assert_eq!(totest.len(), model.len());
-        //eprintln!("{:?}", ops);
         for (i, action) in ops.iter().enumerate() {
-            //eprintln!("{:?}", action);
             match action {
                 CursorAction::StepKey => {
                     model_cursor.step_key();
@@ -160,9 +157,6 @@ proptest! {
                     });
                     assert_eq!(model_invocations, test_invocation);
                 }
-
-
-
             }
         }
     }
