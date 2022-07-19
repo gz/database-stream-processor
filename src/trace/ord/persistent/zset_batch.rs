@@ -1,5 +1,5 @@
 use std::{
-    cmp::max,
+    cmp::{max, Ordering},
     convert::TryFrom,
     fmt::{Debug, Display, Write},
     iter::Peekable,
@@ -506,6 +506,17 @@ where
     _t: PhantomData<(K, R)>,
 }
 
+/// Wrapper for custom key comparison. It works by deserializing the keys and
+/// then comparing it as opposed to the byte-wise comparison which is the
+/// default in RocksDB.
+fn comparator<K: Decode + Ord>(a: &[u8], b: &[u8]) -> Ordering {
+    let (key_a, _) =
+        decode_from_slice::<'_, K, _>(a, BINCODE_CONFIG).expect("Can't decode_from_slice");
+    let (key_b, _) =
+        decode_from_slice::<'_, K, _>(b, BINCODE_CONFIG).expect("Can't decode_from_slice");
+    key_a.cmp(&key_b)
+}
+
 impl<K, R> Builder<K, (), (), R, OrdZSet<K, R>> for OrdZSetBuilder<K, R>
 where
     K: Ord + Clone + Encode + Decode + 'static,
@@ -514,7 +525,10 @@ where
     fn new(_time: ()) -> Self {
         let uuid = Uuid::new_v4();
         let tbl_path = format!("/tmp/{}.db", uuid.to_string());
-        let db = DB::open_default(tbl_path.clone()).unwrap();
+        let mut opts = Options::default();
+        opts.set_comparator("OrdZSet comparator", comparator::<K>);
+        opts.create_if_missing(true);
+        let db = DB::open(&opts, tbl_path.clone()).unwrap();
 
         OrdZSetBuilder {
             db,

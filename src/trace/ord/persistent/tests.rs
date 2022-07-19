@@ -16,10 +16,14 @@ use crate::trace::ord::persistent as persistent_ord;
 use crate::trace::BatchReader;
 use crate::trace::Builder;
 
-#[derive(Clone, Debug, Ord, Eq, Encode, Decode, Arbitrary)]
+/// This is a "complex" key because it defines a custom ordering logic and has a
+/// heap allocated object inside of it [`String`]. The tests ensure that LevelDB
+/// adheres to the same ordering as defines in .
+#[derive(Clone, Debug, Encode, Decode, Arbitrary)]
 struct ComplexKey {
-    _a: isize,
     ord: String,
+    /// We ignore this type for ordering purposes.
+    _a: isize,
 }
 
 impl PartialEq for ComplexKey {
@@ -28,9 +32,17 @@ impl PartialEq for ComplexKey {
     }
 }
 
+impl Eq for ComplexKey {}
+
 impl PartialOrd for ComplexKey {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         self.ord.partial_cmp(&other.ord)
+    }
+}
+
+impl Ord for ComplexKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.ord.cmp(&other.ord)
     }
 }
 
