@@ -1,7 +1,7 @@
 use std::{
     cmp::{max, Ordering},
     convert::TryFrom,
-    fmt::{Debug, Display, Write},
+    fmt::{Debug, Display, Formatter, Write},
     iter::Peekable,
     marker::PhantomData,
     ops::{Add, AddAssign, Neg},
@@ -50,21 +50,33 @@ where
     _t: PhantomData<(K, R)>,
 }
 
-/*
 impl<K, R> Display for OrdZSet<K, R>
 where
-    K: Ord + Clone + Display,
-    R: Eq + HasZero + AddAssignByRef + Clone + Display,
+    K: Ord + Clone + Display + Encode + Decode + 'static,
+    R: Eq + HasZero + AddAssignByRef + Clone + Display + MonoidValue + Encode + Decode,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        writeln!(
-            f,
-            "layer:\n{}",
-            textwrap::indent(&self.layer.to_string(), "    ")
-        )
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        let mut cursor: OrdZSetCursor<K, R> = self.cursor();
+        writeln!(f, "layer:")?;
+        while cursor.key_valid() {
+            while cursor.val_valid() {
+                let weight = cursor.weight();
+
+                writeln!(
+                    f,
+                    "{}",
+                    textwrap::indent(format!("{} -> {}", cursor.key(), weight).as_str(), "    ")
+                )?;
+                cursor.step_val();
+            }
+            cursor.step_key();
+        }
+
+        Ok(())
     }
 }
 
+/*
 impl<K, R> From<OrderedLeaf<K, R>> for OrdZSet<K, R>
 where
     K: Ord,
@@ -97,17 +109,24 @@ where
         Rc::try_unwrap(batch)
     }
 }
+*/
 
 impl<K, R> DeepSizeOf for OrdZSet<K, R>
 where
-    K: DeepSizeOf + Ord,
-    R: DeepSizeOf,
+    K: DeepSizeOf + Ord + Encode + Decode,
+    R: DeepSizeOf + Encode + Decode,
 {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
-        self.layer.deep_size_of()
+        let mem_usage = rocksdb::perf::get_memory_usage_stats(Some(&[&self.db]), None)
+            .expect("failed to get memory usage");
+
+        // TODO(rocksdb API): Unclear if this is the right way
+        (mem_usage.cache_total + mem_usage.mem_table_total)
+            .try_into()
+            .unwrap()
     }
 }
- */
+
 impl<K, R> NumEntries for OrdZSet<K, R>
 where
     K: Ord + Clone + Encode + Decode,
@@ -121,7 +140,7 @@ where
         self.keys
     }
 
-    const CONST_NUM_ENTRIES: Option<usize> = <OrderedLeaf<K, R>>::CONST_NUM_ENTRIES;
+    const CONST_NUM_ENTRIES: Option<usize> = None;
 }
 
 impl<K, R> HasZero for OrdZSet<K, R>

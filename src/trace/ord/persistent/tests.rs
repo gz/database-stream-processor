@@ -204,5 +204,26 @@ fn zset_duplicates() {
     model_builder.push((1, (), 2));
 
     let model = model_builder.done();
-    eprintln!("{:?}", model);
+    eprintln!("{}", model);
+}
+
+#[test]
+fn zset_display() {
+    let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
+    model_builder.push((1, (), 9));
+    model_builder.push((2, (), 4));
+    model_builder.push((3, (), 4));
+
+    let model = model_builder.done();
+    let model = format!("{}", model);
+    eprintln!("{}", model);
+
+    let mut totest_builder = persistent_ord::zset_batch::OrdZSetBuilder::new(());
+    totest_builder.push((1, (), 9));
+    totest_builder.push((2, (), 4));
+    totest_builder.push((3, (), 4));
+
+    let totest = totest_builder.done();
+    let display_totest = format!("{}", model);
+    eprintln!("{}", model);
 }
