@@ -7,6 +7,7 @@ use std::vec::Vec;
 use bincode::Decode;
 use bincode::Encode;
 use proptest::prelude::*;
+use proptest_derive::Arbitrary;
 
 use crate::algebra::MonoidValue;
 use crate::trace::cursor::Cursor;
@@ -14,6 +15,24 @@ use crate::trace::ord as dram_ord;
 use crate::trace::ord::persistent as persistent_ord;
 use crate::trace::BatchReader;
 use crate::trace::Builder;
+
+#[derive(Clone, Debug, Ord, Eq, Encode, Decode, Arbitrary)]
+struct ComplexKey {
+    _a: isize,
+    ord: String,
+}
+
+impl PartialEq for ComplexKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ord.eq(&other.ord)
+    }
+}
+
+impl PartialOrd for ComplexKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.ord.partial_cmp(&other.ord)
+    }
+}
 
 /// Mutable commands on [`Cursor`].
 #[derive(Debug, Clone)]
@@ -62,7 +81,7 @@ proptest! {
     // Verify that our [`Cursor`] implementation for the persistent [`OrdZSet`]
     // behaves the same as the non-persistent [`OrdZSet`] cursor.
     #[test]
-    fn ord_zet_cursor_equivalence(mut ks in keys::<usize>(0..512), ops in actions::<usize, ()>()) {
+    fn ord_zet_cursor_equivalence(mut ks in keys::<ComplexKey>(0..512), ops in actions::<ComplexKey, ()>()) {
         // Builder interface wants sorted, unique(?) keys:
         ks.sort_unstable();
         ks.dedup();
@@ -70,7 +89,7 @@ proptest! {
         // Instantiate a regular OrdZSet
         let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
         for key in ks.iter() {
-            model_builder.push((*key, (), *key));
+            model_builder.push((key.clone(), (), 0));
         }
 
         let model = model_builder.done();
@@ -79,7 +98,7 @@ proptest! {
         // Instantiate a persistent OrdZSet
         let mut totest_builder = persistent_ord::zset_batch::OrdZSetBuilder::new(());
         for key in ks.iter() {
-            totest_builder.push((*key, (), *key));
+            totest_builder.push((key.clone(), (), 0));
         }
         let totest = totest_builder.done();
         let mut totest_cursor = totest.cursor();
