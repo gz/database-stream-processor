@@ -16,14 +16,16 @@ use crate::trace::ord::persistent as persistent_ord;
 use crate::trace::BatchReader;
 use crate::trace::Builder;
 
-/// This is a "complex" key because it defines a custom ordering logic and has a
-/// heap allocated object inside of it [`String`]. The tests ensure that LevelDB
-/// adheres to the same ordering as defines in .
+/// This is a "complex" key because it defines a custom ordering logic & has a
+/// heap allocated [`String`] inside of it. The tests ensure that the RocksDB
+/// based data-structure adhere to the same ordering as the DRAM based version
+/// which is defined through the [`Ord`] trait.
 #[derive(Clone, Debug, Encode, Decode, Arbitrary)]
 struct ComplexKey {
-    ord: String,
-    /// We ignore this type for ordering purposes.
+    /// We ignore this type for ordering.
     _a: isize,
+    /// We use this to define the order of `Self`.
+    ord: String,
 }
 
 impl PartialEq for ComplexKey {
