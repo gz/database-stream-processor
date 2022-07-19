@@ -203,8 +203,8 @@ fn zset_duplicates() {
     model_builder.push((1, (), 1));
     model_builder.push((1, (), 2));
 
-    let model = model_builder.done();
-    eprintln!("{}", model);
+    let _model = model_builder.done();
+    //eprintln!("{}", model);
 }
 
 #[test]
@@ -215,8 +215,7 @@ fn zset_display() {
     model_builder.push((3, (), 4));
 
     let model = model_builder.done();
-    let model = format!("{}", model);
-    eprintln!("{}", model);
+    let display_model = format!("{}", model);
 
     let mut totest_builder = persistent_ord::zset_batch::OrdZSetBuilder::new(());
     totest_builder.push((1, (), 9));
@@ -224,6 +223,6 @@ fn zset_display() {
     totest_builder.push((3, (), 4));
 
     let totest = totest_builder.done();
-    let display_totest = format!("{}", model);
-    eprintln!("{}", model);
+    let display_totest = format!("{}", totest);
+    assert_eq!(display_model, display_totest);
 }

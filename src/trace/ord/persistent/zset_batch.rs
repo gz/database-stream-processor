@@ -71,7 +71,7 @@ where
             }
             cursor.step_key();
         }
-
+        writeln!(f, "")?;
         Ok(())
     }
 }
