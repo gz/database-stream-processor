@@ -1,35 +1,48 @@
 use std::{
-    cmp::{max, Ordering},
-    convert::TryFrom,
-    fmt::{Debug, Display, Formatter, Write},
-    iter::Peekable,
+    cmp::Ordering,
+    fmt::{Debug, Display, Formatter},
     marker::PhantomData,
-    ops::{Add, AddAssign, Neg},
-    rc::Rc,
+    sync::Arc,
 };
 
+use once_cell::sync::Lazy;
 use timely::progress::Antichain;
 
 use crate::{
-    algebra::{AddAssignByRef, AddByRef, HasZero, MonoidValue, NegByRef},
-    lattice::Lattice,
-    trace::{
-        layers::{
-            ordered_leaf::{OrderedLeaf, OrderedLeafBuilder, OrderedLeafCursor},
-            Builder as TrieBuilder, Cursor as TrieCursor, MergeBuilder, Trie, TupleBuilder,
-        },
-        ord::merge_batcher::MergeBatcher,
-        Batch, BatchReader, Builder, Cursor, Merger,
-    },
-    NumEntries, SharedRef,
+    algebra::{AddAssignByRef, HasZero, MonoidValue},
+    trace::{ord::merge_batcher::MergeBatcher, Batch, BatchReader, Builder, Cursor, Merger},
+    NumEntries,
 };
 
 use bincode::{decode_from_slice, Decode, Encode};
 use deepsize::DeepSizeOf;
-use rocksdb::{DBRawIterator, IteratorMode, Options, WriteBatch, DB};
+use rocksdb::{
+    BoundColumnFamily, Cache, DBCompressionType, DBRawIterator, Options, WriteBatch, DB,
+};
 use uuid::Uuid;
 
 use super::{ReusableEncodeBuffer, BINCODE_CONFIG};
+
+const DB_DRAM_CACHE_SIZE: usize = 2 * 1024 * 1024 * 1024;
+
+static DB_PATH: Lazy<String> = Lazy::new(|| {
+    let uuid = Uuid::new_v4();
+    format!("/tmp/{}.db", uuid.to_string())
+});
+
+static DB_OPTS: Lazy<Options> = Lazy::new(|| {
+    let cache = Cache::new_lru_cache(DB_DRAM_CACHE_SIZE).expect("Can't create cache for DB");
+    let mut global_opts = Options::default();
+    global_opts.create_if_missing(true);
+    global_opts.set_compression_type(DBCompressionType::None);
+    global_opts.set_row_cache(&cache);
+    global_opts
+});
+
+static LEVEL_DB: Lazy<DB> = Lazy::new(|| {
+    // Open the database, or create it if it doesn't exist.
+    DB::open(&*DB_OPTS, DB_PATH.clone()).unwrap()
+});
 
 /// An immutable collection of `(key, weight)` pairs without timing information.
 // TODO(persistence) probably want to preserve/implement these traits:
@@ -40,11 +53,11 @@ where
     R: Encode,
 {
     /// Where all the dataz is.
-    db: DB,
+    cf: Arc<BoundColumnFamily<'static>>,
+    _cf_name: String,
+    _cf_options: Options,
     /// The DB only "knows" approximate key count so we store the accurate count here
     keys: usize,
-    /// The underlying file-path for mtbl::Reader
-    path: String,
     pub lower: Antichain<()>,
     pub upper: Antichain<()>,
     _t: PhantomData<(K, R)>,
@@ -117,10 +130,13 @@ where
     R: DeepSizeOf + Encode + Decode,
 {
     fn deep_size_of_children(&self, _context: &mut deepsize::Context) -> usize {
-        let mem_usage = rocksdb::perf::get_memory_usage_stats(Some(&[&self.db]), None)
+        let mem_usage = rocksdb::perf::get_memory_usage_stats(Some(&[&*LEVEL_DB]), None)
             .expect("failed to get memory usage");
 
-        // TODO(rocksdb API): Unclear if this is the right way
+        // For `MemUsageStats`: it looks like `mem_table_total` includes
+        // `mem_table_unflushed`, not sure about `mem_table_readers_total` but I
+        // assume it's the same, so we only care about `cache_total` and
+        // `mem_table_total`
         (mem_usage.cache_total + mem_usage.mem_table_total)
             .try_into()
             .unwrap()
@@ -271,7 +287,7 @@ where
     type Cursor<'s> = OrdZSetCursor<'s, K, R>;
 
     fn cursor(&self) -> Self::Cursor<'_> {
-        let mut db_iter = self.db.raw_iterator();
+        let mut db_iter = LEVEL_DB.raw_iterator_cf(&self.cf);
         db_iter.seek_to_first();
 
         let cur_key_weight = if db_iter.valid() {
@@ -330,7 +346,7 @@ where
     K: Ord + Clone + Encode + Decode + 'static,
     R: MonoidValue + Encode + Decode,
 {
-    _t: PhantomData<(K, R)>,
+    result: OrdZSetBuilder<K, R>,
 }
 
 impl<K, R> Merger<K, (), (), R, OrdZSet<K, R>> for OrdZSetMerger<K, R>
@@ -339,12 +355,18 @@ where
     R: MonoidValue + Encode + Decode,
 {
     fn new(batch1: &OrdZSet<K, R>, batch2: &OrdZSet<K, R>) -> Self {
-        unimplemented!()
+        OrdZSetMerger {
+            result: OrdZSetBuilder::new(()),
+        }
     }
     fn done(self) -> OrdZSet<K, R> {
-        unimplemented!()
+        self.result.done()
     }
     fn work(&mut self, source1: &OrdZSet<K, R>, source2: &OrdZSet<K, R>, fuel: &mut isize) {
+        // https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.ingest_external_file_cf_opts
+        // https://docs.rs/rocksdb/latest/rocksdb/struct.DBWithThreadMode.html#method.live_files
+        // https://docs.rs/rocksdb/latest/rocksdb/struct.LiveFile.html
+        // https://docs.rs/rocksdb/latest/rocksdb/struct.IngestExternalFileOptions.html
         unimplemented!()
     }
 }
@@ -516,8 +538,9 @@ where
     K: Ord,
     R: MonoidValue,
 {
-    db: DB,
-    path: String,
+    cf: Arc<BoundColumnFamily<'static>>,
+    cf_name: String,
+    cf_options: Options,
     /// The DB only "knows" approximate key count so we store the accurate count here.
     batch: WriteBatch,
     tmp_key: ReusableEncodeBuffer,
@@ -542,16 +565,21 @@ where
     R: MonoidValue + Encode + Decode,
 {
     fn new(_time: ()) -> Self {
-        let uuid = Uuid::new_v4();
-        let tbl_path = format!("/tmp/{}.db", uuid.to_string());
-        let mut opts = Options::default();
-        opts.set_comparator("OrdZSet comparator", comparator::<K>);
-        opts.create_if_missing(true);
-        let db = DB::open(&opts, tbl_path.clone()).unwrap();
+        // Create a new column family for the OrdZSet.
+        let cf_name = Uuid::new_v4().to_string();
+        let mut cf_options = Options::default();
+        cf_options.set_comparator("OrdZSet comparator", comparator::<K>);
+        LEVEL_DB
+            .create_cf(cf_name.as_str(), &cf_options)
+            .expect("Can't create column family?");
+        let cf = LEVEL_DB
+            .cf_handle(cf_name.as_str())
+            .expect("Can't find just created column family?");
 
         OrdZSetBuilder {
-            db,
-            path: tbl_path,
+            cf,
+            cf_name,
+            cf_options,
             batch: WriteBatch::default(),
             tmp_key: ReusableEncodeBuffer(Vec::new()),
             tmp_val: ReusableEncodeBuffer(Vec::new()),
@@ -569,19 +597,21 @@ where
     fn push(&mut self, (key, (), diff): (K, (), R)) {
         let encoded_key = self.tmp_key.encode(&key).expect("Can't encode `key`");
         let encoded_val = self.tmp_val.encode(&diff).expect("Can't encode `diff`");
-        self.batch.put(encoded_key, encoded_val);
+
+        self.batch.put_cf(&self.cf, encoded_key, encoded_val);
     }
 
     #[inline(never)]
     fn done(self) -> OrdZSet<K, R> {
         let keys = self.batch.len();
-        self.db
+        LEVEL_DB
             .write(self.batch)
             .expect("Could not write batch to db");
 
         OrdZSet {
-            db: self.db,
-            path: self.path,
+            cf: self.cf,
+            _cf_name: self.cf_name,
+            _cf_options: self.cf_options,
             keys,
             lower: Antichain::from_elem(()),
             upper: Antichain::new(),

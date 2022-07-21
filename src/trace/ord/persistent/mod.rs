@@ -45,4 +45,4 @@ impl Writer for &mut ReusableEncodeBuffer {
 
 #[cfg(test)]
 mod tests;
-mod zset_batch;
+pub mod zset_batch;

@@ -6,6 +6,7 @@ use std::vec::Vec;
 
 use bincode::Decode;
 use bincode::Encode;
+use deepsize::DeepSizeOf;
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
 
@@ -15,6 +16,7 @@ use crate::trace::ord as dram_ord;
 use crate::trace::ord::persistent as persistent_ord;
 use crate::trace::BatchReader;
 use crate::trace::Builder;
+use crate::trace::Merger;
 
 /// This is a "complex" key because it defines a custom ordering logic & has a
 /// heap allocated [`String`] inside of it. The tests ensure that the RocksDB
@@ -225,4 +227,50 @@ fn zset_display() {
     let totest = totest_builder.done();
     let display_totest = format!("{}", totest);
     assert_eq!(display_model, display_totest);
+}
+
+#[test]
+fn zset_deep_size() {
+    let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
+    for i in 0..1 << 20 {
+        model_builder.push((i, (), i));
+    }
+    let model = model_builder.done();
+    let model_size = model.deep_size_of();
+
+    let mut totest_builder = persistent_ord::zset_batch::OrdZSetBuilder::new(());
+    for i in 0..1 << 20 {
+        totest_builder.push((i, (), i));
+    }
+    let totest = totest_builder.done();
+    let totest_size = totest.deep_size_of();
+
+    assert!(
+        totest_size < model_size * 5,
+        "Too much overhead from RocksDB storage?"
+    );
+}
+
+#[test]
+fn zset_merge() {
+    fn make_model() -> dram_ord::zset_batch::OrdZSet<usize, usize> {
+        let mut model_builder = dram_ord::zset_batch::OrdZSetBuilder::new(());
+        for i in 0..1 << 6 {
+            model_builder.push((i, (), 1));
+        }
+        model_builder.done()
+    }
+
+    let modelA = make_model();
+    let modelB = make_model();
+    let mut merger = dram_ord::zset_batch::OrdZSetMerger::new(&modelA, &modelB);
+    let mut fuel = 0;
+    while fuel == 0 {
+        fuel = 1;
+        merger.work(&modelA, &modelB, &mut fuel);
+        eprintln!("merging {}", fuel);
+    }
+    let modelC = merger.done();
+
+    eprintln!("{}", modelC);
 }
