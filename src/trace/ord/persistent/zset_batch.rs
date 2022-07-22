@@ -55,13 +55,23 @@ where
 {
     /// Where all the dataz is.
     cf: Arc<BoundColumnFamily<'static>>,
-    _cf_name: String,
+    cf_name: String,
     _cf_options: Options,
     /// The DB only "knows" approximate key count so we store the accurate count here
     keys: usize,
     pub lower: Antichain<()>,
     pub upper: Antichain<()>,
     _t: PhantomData<(K, R)>,
+}
+
+impl<K, R> Drop for OrdZSet<K, R>
+where
+    K: Ord + Encode + Decode,
+    R: Encode,
+{
+    fn drop(&mut self) {
+        LEVEL_DB.drop_cf(&self.cf_name).expect("Can't delete CF?");
+    }
 }
 
 impl<K, R> Display for OrdZSet<K, R>
@@ -611,7 +621,7 @@ where
 
         OrdZSet {
             cf: self.cf,
-            _cf_name: self.cf_name,
+            cf_name: self.cf_name,
             _cf_options: self.cf_options,
             keys,
             lower: Antichain::from_elem(()),
