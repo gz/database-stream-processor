@@ -36,6 +36,7 @@ static DB_OPTS: Lazy<Options> = Lazy::new(|| {
     global_opts.create_if_missing(true);
     global_opts.set_compression_type(DBCompressionType::None);
     global_opts.set_row_cache(&cache);
+    global_opts.set_max_open_files(9000);
     global_opts
 });
 

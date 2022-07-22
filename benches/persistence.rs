@@ -10,7 +10,7 @@ use rand::Rng;
 use zipf::ZipfDistribution;
 
 /// What different sizes we should instantiate for the set.
-static BENCHMARK_INPUTS: [u64; 1] = [1 << 8];
+static BENCHMARK_INPUTS: [u64; 2] = [1 << 12, 1 << 24];
 
 /// Generate a random sequence of operations
 ///
@@ -81,8 +81,8 @@ fn bench_zset_cursor_seq_access(c: &mut Criterion) {
     for i in BENCHMARK_INPUTS.iter() {
         group.bench_with_input(BenchmarkId::new("Persistent", i), i, |b, i| {
             let persistent_zset = persistent_builder(*i);
-            let mut cursor = persistent_zset.cursor();
             b.iter(|| {
+                let mut cursor = persistent_zset.cursor();
                 let mut idx = 0;
                 while cursor.key_valid() {
                     assert_eq!(*cursor.key(), idx);
@@ -94,8 +94,8 @@ fn bench_zset_cursor_seq_access(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("DRAM", i), i, |b, i| {
             let dram_zset = dram_builder(*i);
-            let mut cursor = dram_zset.cursor();
             b.iter(|| {
+                let mut cursor = dram_zset.cursor();
                 let mut idx = 0;
                 while cursor.key_valid() {
                     assert_eq!(*cursor.key(), idx);
@@ -159,9 +159,9 @@ fn bench_zset_cursor_seek_skewed(c: &mut Criterion) {
 
 criterion_group!(
     benches,
-    //bench_zset_builder,
-    //bench_zset_cursor_seq_access,
-    //bench_zset_cursor_seek_uniform,
+    bench_zset_builder,
+    bench_zset_cursor_seq_access,
+    bench_zset_cursor_seek_uniform,
     bench_zset_cursor_seek_skewed,
 );
 criterion_main!(benches);
