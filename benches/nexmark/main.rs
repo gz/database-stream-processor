@@ -27,7 +27,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::{AllocStats, MiMalloc};
 use num_format::{Locale, ToFormattedString};
 use serde::Serialize;
-use serde_with::{serde_as, DurationSeconds};
+use serde_with::{serde_as, DurationSecondsWithFrac};
 use size_of::HumanBytes;
 use std::{
     path::Path,
@@ -45,7 +45,7 @@ static ALLOC: MiMalloc = MiMalloc;
 struct NexmarkResult {
     name: String,
     num_events: u64,
-    #[serde_as(as = "DurationSeconds<u64>")]
+    #[serde_as(as = "DurationSecondsWithFrac<String>")]
     elapsed: Duration,
     before_stats: AllocStats,
     after_stats: AllocStats,

@@ -4,10 +4,16 @@
 #
 set -ex
 
+if [ -v ${CI_MACHINE_TYPE} ]; then
+    echo "Need to set CI_MACHINE_TYPE"
+    exit 1
+fi
+
 # Clean-up old results
 rm -rf gh-pages
 NEXMARK_CSV_FILE='nexmark_results.csv'
 rm -f ${NEXMARK_CSV_FILE}
+rm nexmark_comment.txt
 
 # Run benchmarks
 cargo bench --bench nexmark --features with-nexmark -- --first-event-rate=1000000 --max-events=100000 --cpu-cores 8  --num-event-generators 6 --source-buffer-size 10000 --input-batch-size 40000 --csv
@@ -49,5 +55,6 @@ git add .
 git commit -a -m "Added benchmark results for $GITHUB_SHA."
 git push origin main
 cd ..
+python3 gh-pages/_scripts/compare_nexmark.py > nexmark_comment.txt
 rm -rf gh-pages
 git clean -f

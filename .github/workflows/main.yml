@@ -317,5 +317,22 @@ jobs:
       - name: Run Benchmarks
         run: |
           bash scripts/ci.bash
+
+    - name: Find Comment
+      uses: peter-evans/find-comment@v2
+      id: fc
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        comment-author: 'github-actions[bot]'
+        body-includes: Nexmark benchmark results
+
+    - name: Create or update comment
+      uses: peter-evans/create-or-update-comment@v2
+      with:
+        comment-id: ${{ steps.fc.outputs.comment-id }}
+        issue-number: ${{ github.event.pull_request.number }}
+        body-file: nexmark_comment.txt
+        edit-mode: replace
+
     env:
       CI_MACHINE_TYPE: "skylake-2x"
