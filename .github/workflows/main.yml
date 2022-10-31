@@ -38,11 +38,11 @@ jobs:
               os: [self-hosted, Linux, skylake-2x],
             }
           - { rust: nightly, target: x86_64-apple-darwin, os: macos-latest }
-          #- {
-          #    rust: nightly,
-          #    target: x86_64-pc-windows-msvc,
-          #    os: windows-latest,
-          #  }
+          - {
+              rust: nightly,
+              target: x86_64-pc-windows-msvc,
+              os: windows-latest,
+            }
           - { rust: nightly, target: i686-pc-windows-msvc, os: windows-latest }
             # TODO: uncomment when we're back to stable Rust.
             #- { rust: beta, target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
@@ -66,6 +66,8 @@ jobs:
 
       - name: Restore cache
         uses: Swatinem/rust-cache@v1
+        exclude:
+          - os: windows-latest
 
       # We split building the tests into a separate step
       # so that we can easily distinguish between build
