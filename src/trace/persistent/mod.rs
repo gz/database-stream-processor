@@ -58,7 +58,8 @@ static DB_OPTS: Lazy<Options> = Lazy::new(|| {
     // RocksDB doesn't like to close files by default, if we set this it limits
     // the number of open files by closing them again (should be set in
     // accordance with ulimit)
-    global_opts.set_max_open_files(9000);
+    global_opts.set_max_open_files(128);
+    global_opts.set_paranoid_checks(false);
     // Some options (that seem to hurt more than help -- needs more
     // experimentation):
     //global_opts.increase_parallelism(2);

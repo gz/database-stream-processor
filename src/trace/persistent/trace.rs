@@ -554,6 +554,7 @@ where
             tombstone_compaction::<B::Val, B::Time, B::R>,
         );
         cf_options.create_if_missing(true);
+        cf_options.set_paranoid_checks(false);
 
         ROCKS_DB_INSTANCE
             .create_cf(cf_name.as_str(), &cf_options)
