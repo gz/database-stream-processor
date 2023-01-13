@@ -138,6 +138,8 @@ fn spawn_source_producer(
 }
 
 fn coordinate_input_and_steps(
+    query: &str,
+    progress_csv: Option<String>,
     expected_num_events: u64,
     dbsp_step_tx: mpsc::SyncSender<()>,
     source_step_tx: mpsc::SyncSender<()>,
@@ -145,6 +147,16 @@ fn coordinate_input_and_steps(
     source_exhausted_rx: mpsc::Receiver<InputStats>,
     dbsp_join_handle: JoinHandle<()>,
 ) -> Result<InputStats> {
+    #[derive(Serialize)]
+    struct ProgressRow<'a> {
+        query: &'a str,
+        elapsed_ms: u128,
+        num_events: usize,
+    }
+    let start = Instant::now();
+    let mut wtr =
+        progress_csv.map(|path| csv::Writer::from_path(path).expect("can't open csv writer"));
+
     // The producer should have already loaded up the first batch ready for
     // consumption before we start the loop.
     // let progress_bar = ProgressBar::new(expected_num_events);
@@ -185,6 +197,15 @@ fn coordinate_input_and_steps(
         for _ in 0..2 {
             if let Ok(StepCompleted::Source(num_events)) = step_done_rx.recv() {
                 progress_bar.inc(num_events as u64);
+
+                if let Some(ref mut wtr) = wtr {
+                    let elapsed_ms = start.elapsed().as_millis();
+                    wtr.serialize(ProgressRow {
+                        query,
+                        elapsed_ms,
+                        num_events,
+                    })?;
+                }
             }
         }
     }

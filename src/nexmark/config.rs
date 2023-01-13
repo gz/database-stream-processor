@@ -111,6 +111,11 @@ pub struct Config {
     /// Store results in a csv file in addition to printing on the command-line.
     #[clap(long = "csv", env = "DBSP_RESULTS_AS_CSV")]
     pub output_csv: Option<String>,
+
+    /// Store fine grained progress, throughput information with timestamps in a
+    /// csv file.
+    #[clap(long = "progress", env = "DBSP_PROGRESS_RESULTS_AS_CSV")]
+    pub progress_csv: Option<String>,
 }
 
 /// Implementation of config methods based on the Java implementation at
@@ -146,6 +151,7 @@ impl Default for Config {
             source_buffer_size: 10_000,
             input_batch_size: 40_000,
             output_csv: None,
+            progress_csv: None,
         }
     }
 }

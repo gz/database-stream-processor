@@ -22,6 +22,7 @@ macro_rules! run_queries {
         let (source_step_tx, source_step_rx): (mpsc::SyncSender<()>, mpsc::Receiver<()>) =
             mpsc::sync_channel(1);
         let (source_exhausted_tx, source_exhausted_rx) = mpsc::sync_channel(1);
+        let progress_csv_path = $nexmark_config.progress_csv.clone();
         spawn_source_producer(
             $nexmark_config,
             input_handle,
@@ -35,6 +36,8 @@ macro_rules! run_queries {
         let start = Instant::now();
 
         let input_stats = coordinate_input_and_steps(
+            stringify!($query),
+            progress_csv_path,
             expected_num_events,
             dbsp_step_tx,
             source_step_tx,
