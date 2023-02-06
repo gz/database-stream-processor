@@ -6,7 +6,7 @@
 //! employee's manager, and outputs a collection of `Analysis` structs that
 //! also include the employee's second-level manager.
 
-use std::hash::Hash;
+use std::{hash::Hash, sync::atomic::AtomicUsize};
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
@@ -21,6 +21,9 @@ use dbsp::{
 use size_of::SizeOf;
 use serde::{de::Error as _, Deserialize, Deserializer};
 use indicatif::{ProgressBar, ProgressStyle};
+use glob::glob;
+use rayon::prelude::*;
+use arcstr::ArcStr;
 
 fn primitive_date_from_str<'de, D: Deserializer<'de>>(
     d: D,
@@ -132,11 +135,11 @@ fn main() -> Result<()> {
     let Args { threads } = Args::parse();
 
     let (mut dbsp, (mut hmanages, output)) = Runtime::init_circuit(threads, |circuit| {
-        let (manages, hmanages) = circuit.add_input_zset::<TickerData, Weight>();
+        let (manages, hmanages) = circuit.add_input_zset::<(&str, TickerData), Weight>();
 
-        let volumes = manages.map_index(|t| { 
+        let volumes = manages.map_index(|(ticker_name, t)| { 
             let timestamp = t.date.with_time(t.time).assume_utc().unix_timestamp();
-            ("OIH", (timestamp, t.clone()))
+            (*ticker_name, (timestamp, t.clone()))
         });
 
         let make_rolling_avg = |s: &Stream<Circuit<()>, OrdIndexedZSet<_, (i64, TickerData), _>>, from, to| {
@@ -192,8 +195,36 @@ fn main() -> Result<()> {
     })
     .unwrap();
     dbsp.step().unwrap();
+
+
+    let mut ticker_files = Vec::with_capacity(50);
+    for entry in glob("examples/data/*.txt").expect("Failed to read glob pattern") {
+        if let Ok(path) = entry {
+            ticker_files.push(path);
+        }
+    }
+    let mut ticker_data: Vec<Vec<((&str, TickerData), i32)>> = Vec::with_capacity(50);
     
-    let progress_bar = ProgressBar::new(1_975_031);
+    println!("Parsing data...");
+    ticker_files.into_par_iter().map(|path| {
+        let ticker_name: &'static str = Box::leak(path.clone().file_stem().unwrap().to_str().unwrap().to_string().into_boxed_str());
+        let mut rdr = csv::ReaderBuilder::new()
+            .buffer_capacity(2*1024*1024)
+            .has_headers(false)
+            .from_path(path).unwrap();
+
+        let mut batch = Vec::with_capacity(10_000);
+        let mut raw_record = csv::ByteRecord::new();
+        while rdr.read_byte_record(&mut raw_record).expect("can't read record") {
+            let record: TickerData = raw_record.deserialize(None).expect("can't parse record");
+            batch.push(((ticker_name.clone(), record), 1));
+        }
+
+        batch
+    }).collect_into_vec(&mut ticker_data);
+
+
+    let progress_bar = ProgressBar::new(ticker_data.iter().map(|v| v.len()).sum::<usize>() as u64);
     progress_bar.set_style(
         ProgressStyle::with_template(
             "{human_pos} / {human_len} [{wide_bar}] {percent:.2} % {per_sec:.2} {eta}",
@@ -203,6 +234,14 @@ fn main() -> Result<()> {
     );
 
     println!("Ingesting data...");
+    for mut data in ticker_data {
+        let about_to_ingest = data.len();
+        hmanages.append(&mut data);
+        progress_bar.inc(about_to_ingest as u64);
+        dbsp.step().unwrap();
+    }
+
+    /*println!("Ingesting data...");
     let mut rdr = csv::ReaderBuilder::new()
         .buffer_capacity(2*1024*1024)
         .has_headers(false)
@@ -221,7 +260,7 @@ fn main() -> Result<()> {
             dbsp.step().unwrap();
             //print_output(&output)
         }
-    }
+    }*/
     output.consolidate();
     dbsp.kill().unwrap();
     progress_bar.finish_with_message("Done");

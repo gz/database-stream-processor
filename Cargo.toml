@@ -103,7 +103,8 @@ time = { version = "0.3.14", features = [
 ] }
 serde_json = "1.0.87"
 serde_with = "2.0.1"
-memmap2 = "0.5"
+glob = "0.3.1"
+rayon = "1.6"
 
 [profile.bench]
 debug = true
@@ -152,7 +153,7 @@ required-features = ["__gdelt"]
 
 [[example]]
 name = "stonks"
-required-features = ["rust_decimal/serde", "with-csv", "size-of/rust_decimal"]
+required-features = ["rust_decimal/serde", "with-csv", "arcstr", "size-of/rust_decimal", "size-of/arcstr"]
 
 # Waiting for bincode 2.0.0 to be released (https://github.com/thomcc/arcstr/pull/45)
 [patch.crates-io.arcstr]
